@@ -1171,26 +1171,34 @@ func (c *Conn) LoadType(ctx context.Context, typeName string) (*pgtype.Type, err
 	}
 
 	var typtype string
+	var typcategory string
 	var typbasetype uint32
 
-	err = c.QueryRow(ctx, "select typtype::text, typbasetype from pg_type where oid=$1", oid).Scan(&typtype, &typbasetype)
+	err = c.QueryRow(ctx, "select typtype::text, typcategory::text, typbasetype from pg_type where oid=$1", oid).Scan(&typtype, &typcategory, &typbasetype)
 	if err != nil {
 		return nil, err
 	}
 
 	switch typtype {
-	case "b": // array
-		elementOID, err := c.getArrayElementOID(ctx, oid)
-		if err != nil {
-			return nil, err
-		}
+	case "b": // base
+		switch typcategory {
+		case "A": // array
+			elementOID, err := c.getArrayElementOID(ctx, oid)
+			if err != nil {
+				return nil, err
+			}
 
-		dt, ok := c.TypeMap().TypeForOID(elementOID)
-		if !ok {
-			return nil, errors.New("array element OID not registered")
-		}
+			dt, ok := c.TypeMap().TypeForOID(elementOID)
+			if !ok {
+				return nil, errors.New("array element OID not registered")
+			}
 
-		return &pgtype.Type{Name: typeName, OID: oid, Codec: &pgtype.ArrayCodec{ElementType: dt}}, nil
+			return &pgtype.Type{Name: typeName, OID: oid, Codec: &pgtype.ArrayCodec{ElementType: dt}}, nil
+		case "S": // string
+			return &pgtype.Type{Name: typeName, OID: oid, Codec: &pgtype.TextCodec{}}, nil
+		default:
+			return &pgtype.Type{}, errors.New("unknown typcategory")
+		}
 	case "c": // composite
 		fields, err := c.getCompositeFields(ctx, oid)
 		if err != nil {
